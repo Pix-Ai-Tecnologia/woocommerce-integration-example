@@ -146,8 +146,19 @@ function get_pixai_payment_data()
 add_action('wp_ajax_clear_pixai_payment_data', 'clear_pixai_payment_data');
 add_action('wp_ajax_nopriv_clear_pixai_payment_data', 'clear_pixai_payment_data'); // Allow guests
 
+function clear_woocommerce_cart()
+{
+    if (WC()->cart) {
+        WC()->cart->empty_cart();
+    }
+}
+
+
 function clear_pixai_payment_data()
 {
+
+    clear_woocommerce_cart();
+
     if (WC()->session) {
         WC()->session->__unset('pixai_payment_data'); // Remove session data
         wp_send_json_success(array('message' => 'Session data cleared successfully'));
