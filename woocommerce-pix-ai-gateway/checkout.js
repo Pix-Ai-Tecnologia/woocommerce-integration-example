@@ -3,6 +3,46 @@ const { createElement, useEffect, useState } = window.wp?.element || {};
 const { getSetting, getCartEndpoint, nonce } = window.wc?.wcSettings || {};
 const settings = window.wc.wcSettings.getSetting("my_pix_ai_gateway_data", {});
 let isSubmitting = false;
+
+const fetchExistingOrder = async (orderId) => {
+  const orderUrl = `${window.pixAiSettings.storeApiUrl}/orders/${orderId}`;
+
+  console.log("Fetching existing order data:", orderUrl);
+
+  try {
+    const response = await fetch(orderUrl, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-WC-Store-API-Nonce": window.pixAiSettings.nonce,
+        Nonce: window.pixAiSettings.nonce,
+      },
+    });
+
+    const data = await response.json();
+    console.log("Order data:", data);
+
+    if (data.payment_result?.payment_status === "success") {
+      const paymentDetailsObject = Object.fromEntries(
+        data.payment_result.payment_details.map((detail) => [
+          detail.key,
+          detail.value,
+        ])
+      );
+
+      console.log("Existing order payment details:", paymentDetailsObject);
+
+      setQrCode(paymentDetailsObject.qr_code); // Display the QR Code
+      await waitForPaymentConfirmation(
+        paymentDetailsObject.payment_identification,
+        paymentDetailsObject.api_token,
+        paymentDetailsObject
+      );
+    }
+  } catch (error) {
+    console.error("Error fetching order data:", error);
+  }
+};
 const PixAiPayment = (props) => {
   const [qrCode, setQrCode] = useState(null);
   const [isPaid, setIsPaid] = useState(false);
@@ -12,31 +52,33 @@ const PixAiPayment = (props) => {
 
   const checkoutUrl = ajaxUrl + "/checkout";
 
-//   console.log("Submitting to WooCommerce Checkout API:", checkoutUrl);
+  //   console.log("Submitting to WooCommerce Checkout API:", checkoutUrl);
 
-//   console.log("window.pixAiSettings: ", [window.pixAiSettings]);
+  //   console.log("window.pixAiSettings: ", [window.pixAiSettings]);
   //   console.log("props: ", window.wc?.wcSettings);
 
   useEffect(() => {
     const unsubscribe = onPaymentSetup(async () => {
       console.log("onPaymentSetup", [isPaid, isSubmitting]);
 
-      if (isPaid) return;
-      if (isSubmitting) return;
+      if (isPaid || isSubmitting) return;
 
       isSubmitting = true;
 
       // Show loading message
       setQrCode("loading");
 
+      if (props.orderId) {
+        await fetchExistingOrder(props.orderId);
+        isSubmitting = false;
+        return;
+      }
+
       const body = JSON.stringify({
         payment_method: props.activePaymentMethod,
-        // billing: props.billingData,
         billing_address: props.billing.billingAddress,
         shipping_address: props.shippingData,
       });
-
-      //   console.log("body: ", body);
 
       try {
         const response = await fetch(checkoutUrl, {
@@ -49,21 +91,17 @@ const PixAiPayment = (props) => {
           body: body,
         });
 
-        let data;
         let responseText;
-        // console.log("response: ", response);
+        let data;
 
         try {
           responseText = await response.text();
-          //   console.log("responseText: ", responseText);
         } catch (err) {
           console.log("err responseText: ", err);
         }
 
         try {
           data = JSON.parse(responseText);
-
-          //   console.log("data: ", data);
         } catch (error) {
           console.log("error: ", error);
         }
@@ -101,6 +139,8 @@ const PixAiPayment = (props) => {
         console.log("error: ", error);
 
         console.log("Erro na requisição do QR Code:", JSON.stringify(error));
+      } finally {
+        isSubmitting = false;
       }
     });
 
@@ -138,24 +178,15 @@ const PixAiPayment = (props) => {
           clearInterval(interval);
           setIsPaid(true);
 
-          fetch(window.pixAiSettings.storeApiUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: new URLSearchParams({
-              action: "pix_ai_update_order",
-              order_id: orderId,
-            }),
+          //   fetch(`${window.pixAiSettings.storeApiUrl}/orders/${orderId}`, {
+          fetch(`${window.pixAiSettings.checkApiUrl}/${orderId}`, {
+            method: "GET",
           })
             .then((response) => response.json())
             .then((data) => {
-              if (data.success) {
-                console.log("Order updated to paid:", data);
-                window.location.href = orderReceivedUrl; // Redirect to order confirmation page
-              } else {
-                console.error("Failed to update order:", data);
-              }
+              window.location.href = orderReceivedUrl;
+
+              console.log("Order updated to paid:", data);
             })
             .catch((error) => console.error("Error updating order:", error));
         }
@@ -180,6 +211,17 @@ const PixAiPayment = (props) => {
         })
       : null
   );
+};
+
+const PixAiPaymentContent = (props) => {
+  //   console.log("Submitting to WooCommerce Checkout API:", checkoutUrl);
+
+  //   console.log("window.pixAiSettings: ", [window.pixAiSettings]);
+  //   console.log("props: ", window.wc?.wcSettings);
+
+  // Function to check payment status every 5 seconds
+
+  return createElement("div", null);
 };
 
 // Register the payment method in WooCommerce Blocks

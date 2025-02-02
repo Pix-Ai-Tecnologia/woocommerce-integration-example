@@ -32,6 +32,7 @@ class My_Custom_Gateway extends WC_Payment_Gateway
         'description' => __('Enter your API token for Pix Ai Gateway.', 'my-woocommerce-pix-ai-gateway'),
         'default'     => '',
       ),
+
       // Add more settings fields as needed
     );
   }
