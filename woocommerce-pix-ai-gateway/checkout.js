@@ -2,55 +2,105 @@ const { registerPaymentMethod } = window.wc?.wcBlocksRegistry || {};
 const { createElement, useEffect, useState } = window.wp?.element || {};
 const { getSetting, getCartEndpoint, nonce } = window.wc?.wcSettings || {};
 const settings = window.wc.wcSettings.getSetting("my_pix_ai_gateway_data", {});
+let isSubmitting = false;
 const PixAiPayment = (props) => {
   const [qrCode, setQrCode] = useState(null);
   const [isPaid, setIsPaid] = useState(false);
-  const { onPaymentProcessing } = props.eventRegistration;
+  const { onPaymentProcessing, onPaymentSetup } = props.eventRegistration;
 
-  const ajaxUrl = window.pixAiSettings?.ajax_url || "";
+  const ajaxUrl = window.pixAiSettings?.storeApiUrl || "";
 
-  console.log("ajaxUrl: ", [ajaxUrl, window.pixAiSettings]);
-  console.log("settings: ", settings);
+  const checkoutUrl = ajaxUrl + "/checkout";
+
+//   console.log("Submitting to WooCommerce Checkout API:", checkoutUrl);
+
+//   console.log("window.pixAiSettings: ", [window.pixAiSettings]);
+  //   console.log("props: ", window.wc?.wcSettings);
 
   useEffect(() => {
-    const unsubscribe = onPaymentProcessing(async () => {
+    const unsubscribe = onPaymentSetup(async () => {
+      console.log("onPaymentSetup", [isPaid, isSubmitting]);
+
       if (isPaid) return;
+      if (isSubmitting) return;
+
+      isSubmitting = true;
 
       // Show loading message
       setQrCode("loading");
 
+      const body = JSON.stringify({
+        payment_method: props.activePaymentMethod,
+        // billing: props.billingData,
+        billing_address: props.billing.billingAddress,
+        shipping_address: props.shippingData,
+      });
+
+      //   console.log("body: ", body);
+
       try {
-        const response = await fetch(
-          getCartEndpoint() + "/checkout",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-WC-Store-API-Nonce": nonce,
-            },
-            body: JSON.stringify({
-              payment_method: "my_pix_ai_gateway_data",
-              billing: props.billingData,
-              shipping: props.shippingData,
-            }),
-          }
-        );
+        const response = await fetch(checkoutUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-WC-Store-API-Nonce": window.pixAiSettings.nonce,
+            Nonce: window.pixAiSettings.nonce,
+          },
+          body: body,
+        });
 
-        const data = await response.json();
+        let data;
+        let responseText;
+        // console.log("response: ", response);
 
-        console.log("data: ", data);
-
-        if (data.result === "success" && data.qr_code) {
-          setQrCode(data.qr_code); // Display the QR Code
-          await waitForPaymentConfirmation(
-            data.payment_identification,
-            data.api_token
-          );
-        } else {
-          console.error("Erro ao gerar QR Code:", data);
+        try {
+          responseText = await response.text();
+          //   console.log("responseText: ", responseText);
+        } catch (err) {
+          console.log("err responseText: ", err);
         }
+
+        try {
+          data = JSON.parse(responseText);
+
+          //   console.log("data: ", data);
+        } catch (error) {
+          console.log("error: ", error);
+        }
+
+        if (data) {
+          if (data?.payment_result?.payment_status === "success") {
+            const paymentDetailsObject = Object.fromEntries(
+              data.payment_result.payment_details.map((detail) => [
+                detail.key,
+                detail.value,
+              ])
+            );
+
+            console.log("paymentDetailsObject: ", paymentDetailsObject);
+
+            setQrCode(paymentDetailsObject.qr_code); // Display the QR Code
+            await waitForPaymentConfirmation(
+              paymentDetailsObject.payment_identification,
+              paymentDetailsObject.api_token,
+              paymentDetailsObject
+            );
+          }
+        }
+
+        // if (data?.result === "success" && data?.qr_code) {
+        //   setQrCode(data.qr_code); // Display the QR Code
+        //   await waitForPaymentConfirmation(
+        //     data.payment_identification,
+        //     data.api_token
+        //   );
+        // } else {
+        //   console.log("Erro ao gerar QR Code:", data);
+        // }
       } catch (error) {
-        console.error("Erro na requisição do QR Code:", JSON.stringify(error));
+        console.log("error: ", error);
+
+        console.log("Erro na requisição do QR Code:", JSON.stringify(error));
       }
     });
 
@@ -58,8 +108,14 @@ const PixAiPayment = (props) => {
   }, [ajaxUrl, onPaymentProcessing, isPaid]);
 
   // Function to check payment status every 5 seconds
-  const waitForPaymentConfirmation = async (orderId, token) => {
+  const waitForPaymentConfirmation = async (
+    orderId,
+    token,
+    paymentDetailsObject
+  ) => {
     const checkPaymentUrl = `https://manager.pixai.com.br/api/integration/payment-initiation/${orderId}`;
+
+    // console.log("orderId, token: ", [orderId, token]);
 
     const interval = setInterval(async () => {
       try {
@@ -72,10 +128,36 @@ const PixAiPayment = (props) => {
         });
         const result = await res.json();
 
-        if (result.success && result.paid) {
+        const orderId = paymentDetailsObject.order_id;
+
+        const orderReceivedUrl = `/my-account/view-order/${orderId}`;
+
+        // console.log("result: ", result);
+
+        if (result.localPayment.status === "CONFIRMED") {
           clearInterval(interval);
           setIsPaid(true);
-          window.location.href = result.redirect_url; // Redirect to WooCommerce order page
+
+          fetch(window.pixAiSettings.storeApiUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+              action: "pix_ai_update_order",
+              order_id: orderId,
+            }),
+          })
+            .then((response) => response.json())
+            .then((data) => {
+              if (data.success) {
+                console.log("Order updated to paid:", data);
+                window.location.href = orderReceivedUrl; // Redirect to order confirmation page
+              } else {
+                console.error("Failed to update order:", data);
+              }
+            })
+            .catch((error) => console.error("Error updating order:", error));
         }
       } catch (error) {
         console.error("Erro ao verificar pagamento:", error);
@@ -90,7 +172,12 @@ const PixAiPayment = (props) => {
     qrCode === "loading"
       ? createElement("p", null, "Gerando QR Code...")
       : qrCode
-      ? createElement("img", { src: qrCode, alt: "QR Code Pix Ai" })
+      ? createElement("img", {
+          src: `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(
+            qrCode
+          )}&size=200x200`,
+          alt: "QR Code Pix Ai",
+        })
       : null
   );
 };
@@ -110,113 +197,3 @@ const Block_Gateway = {
 if (registerPaymentMethod) {
   registerPaymentMethod(Block_Gateway);
 }
-
-// =================
-
-// const settings = window.wc.wcSettings.getSetting("my_pix_ai_gateway_data", {});
-// const label = window.wp.i18n.__("Pix Ai Gateway", "my_pix_ai_gateway");
-
-// // // import { registerPaymentMethod } from "@woocommerce/blocks-registry";
-// // import { useEffect, useState } from "@wordpress/element";
-
-// const { registerPaymentMethod } = window.wc.wcBlocksRegistry;
-// const { useEffect, useState } = window.wp.element;
-// const { getSetting } = window.wc?.wcSettings || {}; // Ensure WooCommerce settings exist
-// const { createElement } = window.wp?.element || {};
-
-// const ContentEdit = (props) => {
-//   const [qrCode, setQrCode] = useState(null);
-//   const [isLoading, setIsLoading] = useState(false);
-//   const { onPaymentProcessing } = props.eventRegistration;
-
-//   const ajaxUrl = getSetting ? getSetting('wc_ajax_url', '') + '&action=generate_pix_qr_code' : '';
-
-//   useEffect(() => {
-//     const unsubscribe = onPaymentProcessing(async () => {
-//       setIsLoading(true);
-
-//       // Get WooCommerce form data
-//       const billingData = props.billing;
-//       console.log("Billing Data:", billingData); // Debugging, remove in production
-
-//       // Create request body for Pix Ai API
-//       const formData = new URLSearchParams({
-//         action: "generate_pix_qr_code",
-//         amount: billingData?.total || 0, // Order amount
-//         email: billingData?.billing_email || "", // Customer email
-//         name: billingData?.billing_first_name || "", // Customer name
-//       });
-
-//       try {
-//         const response = await fetch(ajaxUrl, {
-//           method: "POST",
-//           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-//           body: formData,
-//         });
-
-//         const data = await response.json();
-//         if (data.success) {
-//           setQrCode(data.data.qr_code_url);
-//         } else {
-//           console.error("Erro ao gerar QR Code:", data);
-//         }
-//       } catch (error) {
-//         console.error("Erro na requisição do QR Code:", error);
-//       }
-
-//       setIsLoading(false);
-//     });
-
-//     return () => unsubscribe();
-//   }, [ajaxUrl, onPaymentProcessing, props.billing]);
-
-//   return createElement(
-//     "div",
-//     null,
-//     createElement(
-//       "p",
-//       null,
-//       "Clique em finalizar compra para gerar seu QR Code Pix."
-//     ),
-//     isLoading
-//       ? createElement("p", null, "Gerando QR Code...")
-//       : qrCode
-//       ? createElement("img", { src: qrCode, alt: "QR Code Pix Ai" })
-//       : null
-//   );
-// };
-
-// // const Content = () => {
-// //   return (
-// //     <div>
-// //       <p>{window.wp.htmlEntities.decodeEntities(settings.description || "")}</p>
-// //       <img
-// //         src="https://api.qrserver.com/v1/create-qr-code/?data=PixAiExample&size=200x200"
-// //         alt="QR Code Pix Ai"
-// //       />
-// //     </div>
-// //   );
-// // };
-
-// // const ContentEdit = () => {
-// //   return window.wp.htmlEntities.decodeEntities(settings.description || "");
-// //   // <div>
-// //   //     {window.wp.htmlEntities.decodeEntities(settings.description || '')}
-// //   //     <div>{window.wp.i18n.__('This is a text inside a div.', 'my_pix_ai_gateway')}</div>
-// //   // </div>
-// // };
-
-// const Block_Gateway = {
-//   name: "my_pix_ai_gateway",
-//   label: label,
-//   content: Object(window.wp.element.createElement)(ContentEdit, null),
-//   edit: Object(window.wp.element.createElement)(ContentEdit, null),
-//   //   content: ContentEdit,
-//   //   edit: ContentEdit,
-//   canMakePayment: () => true,
-//   ariaLabel: label,
-//   supports: {
-//     features: ["products"],
-//   },
-// };
-// window.wc.wcBlocksRegistry.registerPaymentMethod(Block_Gateway);

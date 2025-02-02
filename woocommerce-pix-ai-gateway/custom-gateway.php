@@ -22,34 +22,64 @@ function woocommerce_myplugin()
     include(plugin_dir_path(__FILE__) . 'class-gateway.php');
 }
 
+add_action('wp_ajax_pix_ai_update_order', 'pix_ai_update_order_status');
+add_action('wp_ajax_nopriv_pix_ai_update_order', 'pix_ai_update_order_status');
+
+function pix_ai_update_order_status()
+{
+    if (!isset($_POST['order_id'])) {
+        wp_send_json_error(['message' => 'Missing order ID']);
+        exit;
+    }
+
+    $order_id = intval($_POST['order_id']);
+    $order = wc_get_order($order_id);
+
+    if (!$order) {
+        wp_send_json_error(['message' => 'Invalid order']);
+        exit;
+    }
+
+    // Update order status to completed
+    $order->update_status('completed', __('Payment confirmed via Pix Ai.', 'my-woocommerce-pix-ai-gateway'));
+    $order->save();
+
+    wp_send_json_success(['message' => 'Order marked as completed']);
+}
+
 
 
 add_action('wp_enqueue_scripts', function () {
     if (function_exists('is_checkout') && is_checkout()) {
-        // wp_enqueue_script(
-        //     'my_pix_ai_gateway',
-        //     plugins_url('checkout.js', __FILE__),
-        //     ['wp-element', 'wc-blocks-registry', 'wc-settings'], // Ensure dependencies
-        //     filemtime(plugin_dir_path(__FILE__) . 'checkout.js'),
-        //     true
-        // );
-
-        wp_register_script(
+        wp_enqueue_script(
             'my_pix_ai_gateway',
             plugins_url('checkout.js', __FILE__),
-            ['wp-element', 'wc-blocks-registry', 'wc-settings'], // Load dependencies
+            ['wp-element', 'wc-blocks-registry', 'wc-settings'], // Ensure dependencies
             filemtime(plugin_dir_path(__FILE__) . 'checkout.js'),
             true
         );
 
+        // wp_register_script(
+        //     'my_pix_ai_gateway',
+        //     plugins_url('checkout.js', __FILE__),
+        //     ['wp-element', 'wc-blocks-registry', 'wc-settings'], // Load dependencies
+        //     filemtime(plugin_dir_path(__FILE__) . 'checkout.js'),
+        //     true
+        // );
+
+        $nonce = wp_create_nonce('wc_store_api');
+
         // Pass AJAX URL and security nonce to JavaScript
         wp_localize_script('my_pix_ai_gateway', 'pixAiSettings', [
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce'    => wp_create_nonce('pix_ai_nonce')
+            // 'ajax_url' => WC()->api_request_url('checkout'), // Ensure correct checkout endpoint
+            'storeApiUrl' => get_rest_url(null, 'wc/store/v1'),
+            'nonce'    => $nonce,
         ]);
 
+        error_log("WooCommerce Nonce Generated: " . $nonce);
+
         // Finally enqueue the script
-        wp_enqueue_script('my_pix_ai_gateway');
+        // wp_enqueue_script('my_pix_ai_gateway');
     }
 });
 
