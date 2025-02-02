@@ -63,11 +63,7 @@ async function fetchSectionData(setQrCode, setIsPaid) {
   return fetch("/wp-admin/admin-ajax.php?action=get_pixai_payment_data")
     .then((response) => response.json()) // Convert response to JSON
     .then(async (data) => {
-      console.log("data: ", data);
-
       if (data.result === "success") {
-        console.log("Payment Data:", data);
-
         setQrCode(data.qr_code); // Display the QR Code
 
         await waitForPaymentConfirmation(
@@ -116,8 +112,6 @@ const waitForPaymentConfirmation = async (
           .then((response) => response.json())
           .then((data) => {
             window.location.href = orderReceivedUrl;
-
-            console.log("Order updated to paid:", data);
             clearSessionData();
           })
           .catch((error) => console.error("Error updating order:", error));

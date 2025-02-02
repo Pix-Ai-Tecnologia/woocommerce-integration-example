@@ -78,7 +78,6 @@ class My_Custom_Gateway extends WC_Payment_Gateway
       ),
     ));
 
-
     $body = json_decode(wp_remote_retrieve_body($response), true);
 
     if (!empty($existing_order)) {
@@ -99,9 +98,6 @@ class My_Custom_Gateway extends WC_Payment_Gateway
       return;
     }
 
-
-
-
     if (isset($body['localPayment']['pix_qr_code'])) {
       // Save the payment data
       update_post_meta($order_id, '_pix_qrcode', $body['localPayment']['pix_qr_code']);
@@ -110,13 +106,6 @@ class My_Custom_Gateway extends WC_Payment_Gateway
       $order->update_status('on-hold', __('Awaiting Pix payment.', 'my-woocommerce-pix-ai-gateway'));
       $order->update_meta_data('_pix_qr_code', $body['localPayment']['pix_qr_code']);
       $order->save();
-
-      // Redirect to the payment page
-      error_log('body: ' . $body['localPayment']['pix_qr_code']);
-      // return array(
-      //   'result'   => 'success',
-      //   'redirect' => $this->get_return_url($order),
-      // );
 
       $response = array(
         'result'   => 'success',
