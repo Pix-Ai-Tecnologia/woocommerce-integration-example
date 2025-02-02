@@ -53,9 +53,18 @@ class My_Custom_Gateway extends WC_Payment_Gateway
     $amount = $order->get_total() * 100; // Convert to cents
     $api_token = $this->get_option('api_token');
 
-    error_log('API Token: ' . $api_token);
+    error_log('order_id: ' . $order_id);
 
-    // API request to create a Pix payment
+    $order = wc_get_order($order_id);
+
+    // 🚨 Verificar se já existe um pedido para evitar duplicação
+    $existing_order = wc_get_orders(array(
+      'limit' => 1,
+      'status' => array('pending', 'on-hold', 'processing'),
+      'meta_key' => '_pixai_order_id',
+      'meta_value' => $order_id,
+    ));
+
     $response = wp_remote_post('https://manager.pixai.com.br/api/integration/payment-initiation', array(
       'method'    => 'POST',
       'body'      => json_encode(array(
@@ -69,12 +78,28 @@ class My_Custom_Gateway extends WC_Payment_Gateway
       ),
     ));
 
+
+    $body = json_decode(wp_remote_retrieve_body($response), true);
+
+    if (!empty($existing_order)) {
+      error_log('Pedido já existe. ID: ' . $order_id);
+      return array(
+        'result'   => 'success',
+        'qr_code'  => $body['localPayment']['pix_qr_code'], // Send QR Code to JS
+        'payment_identification' => $body['localPayment']['payment_identification'], // Send payment identification to JS
+        'order_id' => $order_id, // Pass order ID for tracking
+        'api_token' => $api_token, // Pass API token for tracking
+      );
+    }
+
+    // API request to create a Pix payment
+
     if (is_wp_error($response)) {
       wc_add_notice('Error creating Pix payment.', 'error');
       return;
     }
 
-    $body = json_decode(wp_remote_retrieve_body($response), true);
+
 
 
     if (isset($body['localPayment']['pix_qr_code'])) {
@@ -93,13 +118,19 @@ class My_Custom_Gateway extends WC_Payment_Gateway
       //   'redirect' => $this->get_return_url($order),
       // );
 
-      return array(
+      $response = array(
         'result'   => 'success',
         'qr_code'  => $body['localPayment']['pix_qr_code'], // Send QR Code to JS
         'payment_identification' => $body['localPayment']['payment_identification'], // Send payment identification to JS
         'order_id' => $order_id, // Pass order ID for tracking
-        'api_token' => $api_token, // Pass API token for tracking
+        'api_token' => $api_token // Pass API token for tracking
       );
+
+      $json_response = json_encode($response);
+
+      WC()->session->set('pixai_payment_data', $json_response);
+
+      return $response;
     }
 
     wc_add_notice('Failed to process Pix payment.', 'error');

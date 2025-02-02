@@ -77,6 +77,24 @@ function pix_ai_update_order_status()
     wp_send_json_success(['message' => 'Order marked as completed']);
 }
 
+add_action('woocommerce_checkout_order_processed', 'pix_ai_prevent_duplicate_order', 10, 1);
+
+function pix_ai_prevent_duplicate_order($order_id)
+{
+    $already_processed = get_post_meta($order_id, '_pixai_order_processed', true);
+
+    error_log("validando order");
+
+    if ($already_processed) {
+        error_log("Ordem já processada: " . $order_id);
+        return;
+    }
+
+    update_post_meta($order_id, '_pixai_order_processed', 'yes');
+
+    // Aqui entra a lógica de atualização do pedido normalmente
+}
+
 
 
 add_action('wp_enqueue_scripts', function () {
@@ -120,6 +138,37 @@ add_action('wp_enqueue_scripts', function () {
 
 
 add_filter('woocommerce_payment_gateways', 'add_my_pix_ai_gateway');
+
+add_action('wp_ajax_get_pixai_payment_data', 'get_pixai_payment_data');
+add_action('wp_ajax_nopriv_get_pixai_payment_data', 'get_pixai_payment_data'); // Allow guest users
+
+function get_pixai_payment_data()
+{
+    if (WC()->session) {
+        $payment_data = WC()->session->get('pixai_payment_data');
+
+        if (!empty($payment_data)) {
+            wp_send_json(json_decode($payment_data, true)); // Send stored session data
+        } else {
+            wp_send_json_error('No payment data found');
+        }
+    } else {
+        wp_send_json_error('Session not initialized');
+    }
+}
+
+add_action('wp_ajax_clear_pixai_payment_data', 'clear_pixai_payment_data');
+add_action('wp_ajax_nopriv_clear_pixai_payment_data', 'clear_pixai_payment_data'); // Allow guests
+
+function clear_pixai_payment_data()
+{
+    if (WC()->session) {
+        WC()->session->__unset('pixai_payment_data'); // Remove session data
+        wp_send_json_success(array('message' => 'Session data cleared successfully'));
+    } else {
+        wp_send_json_error('Session not initialized');
+    }
+}
 
 function add_my_pix_ai_gateway($gateways)
 {
