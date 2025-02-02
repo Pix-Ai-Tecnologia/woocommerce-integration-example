@@ -1,4 +1,4 @@
-PLUGIN_NAME = pix-ai-payment-gateway
+PLUGIN_NAME = woocommerce-pix-ai-gateway
 ZIP_NAME = $(PLUGIN_NAME).zip
 
 .PHONY: all clean zip

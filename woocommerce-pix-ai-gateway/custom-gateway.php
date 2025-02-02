@@ -1,17 +1,14 @@
 <?php
 /*
 Plugin Name: Pix Ai Gateway
-Description: A custom payment gateway for WooCommerce.
-Version: 1.0.0
-Author: Dev team Sevengits
-Author URI: sevengits.com
+Description: Plugin Pix Aí para o WooCommerce.
+Version: 1.0.2
+Author: Pix Aí Tecnologia
+Author URI: www.pixai.com.br
 License: GPL-2.0+
 License URI: http://www.gnu.org/licenses/gpl-2.0.txt
 Text Domain: woocommerce-pix-ai-gateway
-Domain Path: /languages
 */
-
-// Your plugin code goes here
 
 add_action('plugins_loaded', 'woocommerce_myplugin', 0);
 function woocommerce_myplugin()
